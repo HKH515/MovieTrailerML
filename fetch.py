@@ -17,7 +17,7 @@ def video_to_frames(input_loc, output_loc, frame_skip):
         input_loc: Input video file.
         output_loc: Output directory to save the frames.
     Returns:
-        None
+        Non
     """
     try:
         os.mkdir(output_loc)
@@ -41,12 +41,11 @@ def video_to_frames(input_loc, output_loc, frame_skip):
         for i in range(frame_skip):
             ret, frame = cap.read()
             actual_frames += 1
+        cv2.imwrite(output_loc + "/%#05d.jpg" % (count), frame)
         count += 1
         # Write the results back to output location.
-        cv2.imwrite(output_loc + "/%#05d.jpg" % (count+1), frame)
-        count = count + 1
         # If there are no more frames left
-        if (actual_frames > (video_length) - 2):
+        if (actual_frames > (video_length) - frame_skip):
             # Log the time again
             time_end = time.time()
             # Release the feed
@@ -57,19 +56,33 @@ def video_to_frames(input_loc, output_loc, frame_skip):
             break
 
 if __name__ == "__main__":
-    urls = open("urls.txt")
-
     data_folder = sys.argv[1].strip()
     frame_skip = int(sys.argv[2])
-
     try:
         os.mkdir("frames")
     except:
         pass
-    call(["youtube-dl", "-a", "urls.txt", "-o{data_folder}/%(title)s".format(data_folder = data_folder), "--restrict-filenames", "-f", "mp4"])
 
-    for filename in os.listdir(data_folder):
-        input_path = "%s/%s" % (data_folder, filename)
-        output_path = "%s/frames/%s" % (os.getcwd(), filename)
-        print(output_path)
-        video_to_frames(input_path, output_path, frame_skip)
+    csv_file = open("preprocessed_movies.csv", 'r')
+
+    csv_reader = csv.DictReader(csv_file, delimiter = ',', quotechar = '"')
+
+    cntr = 0
+
+    downloaded_links = set()
+
+    for row in csv_reader:
+        yt_link = "https://youtube.com/watch?v={}".format(row["youtubeId"])
+        if yt_link in downloaded_links:
+            continue
+        vid_output = "{}/{}".format(data_folder, row["movieId"])
+        call(["youtube-dl", "-o{}".format(vid_output), yt_link, "--restrict-filenames", "-f", "mp4/worstvideo"])
+
+        downloaded_links.add(yt_link)
+
+        output_path = "%s/frames/%s" % (os.getcwd(), row["movieId"])
+        video_to_frames(vid_output, output_path, frame_skip)
+        call(["rm", "-rf", vid_output])
+
+        if cntr > 200:
+            exit()
