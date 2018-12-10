@@ -49,7 +49,7 @@ class data_generator(Sequence):
             
 
             # Pad zeros to the end s.t. the length is the max of the whole set
-            frames.extend([np.zeros(frame_data.shape) for _ in range(self.z_num - len(frames))])
+            #frames.extend([np.zeros(frame_data.shape) for _ in range(self.z_num - len(frames))])
             batch_data.append(frames)
         return np.array(batch_data), np.array(batch_y)
 
@@ -75,7 +75,7 @@ longest_trailer_movieId, longest_trailer_length = longest_trailer(frame_info)
 trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
 trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
 
-BATCH_SIZE = 4
+BATCH_SIZE = 1
 EPOCHS = 5
 TRAIN_SAMPLES = len(trainX)
 VAL_SAMPLES = len(valX)
@@ -101,6 +101,7 @@ model.add(Dense(len(genres)))
 model.add(Activation("softmax"))
 
 opt = rmsprop(lr=0.0001, decay=1e-6)
+
 
 model.compile(loss="categorical_crossentropy", optimizer=opt, metrics=["accuracy"])
 
