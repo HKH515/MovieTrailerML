@@ -40,7 +40,7 @@ class data_generator(Sequence):
         for movieId in batch_x:
             frames = []
             #print("Dealing with movieId {}".format(movieId))
-            for frame in os.listdir("frames/%s" % movieId):
+            for frame in sorted(os.listdir("frames/%s" % movieId)):
                 frame_data = cv2.imread("frames/%s/%s" % (movieId, frame))
                 frame_data = cv2.resize(frame_data, dsize=(64, 64), interpolation=cv2.INTER_NEAREST)
                 frames.append(frame_data)
@@ -65,9 +65,16 @@ genres = df.columns[4:].tolist()
 frame_sequences = []
 labels = []
 
+AMOUNT_TO_TRAIN = 1000
+LIMIT_TRAIN_SET = False
+
 # drop all data not needed for machine learning
-data = df.loc[:,'movieId']
-labels = df.loc[:, genres].values.tolist()
+if LIMIT_TRAIN_SET:
+    data = df.loc[:AMOUNT_TO_TRAIN,'movieId']
+    labels = df.loc[:AMOUNT_TO_TRAIN, genres].values.tolist()
+else:
+    data = df.loc[:,'movieId']
+    labels = df.loc[:, genres].values.tolist()
 
 # find longest trailer
 longest_trailer_movieId, longest_trailer_length = longest_trailer(frame_info)
@@ -75,10 +82,11 @@ longest_trailer_movieId, longest_trailer_length = longest_trailer(frame_info)
 trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
 trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
 
-BATCH_SIZE = 1
-EPOCHS = 5
+BATCH_SIZE = 3
+EPOCHS = 2
 TRAIN_SAMPLES = len(trainX)
 VAL_SAMPLES = len(valX)
+TEST_SAMPLES = len(testX)
 
 # now we have to explicitly state shape of our samples because of generators gah
 # (x, y, z, color)
@@ -92,23 +100,24 @@ model.add(MaxPooling3D(pool_size=(2, 2, 2)))
 model.add(Dropout(0.25))
 
 model.add(Flatten()) # it is important to flatten your 2d tensors to 1d when going to FC-layers
-model.add(Dense(512, bias_initializer='ones'))
+model.add(Dense(32, bias_initializer='ones'))
 model.add(Activation("relu"))
 model.add(BatchNormalization())
 model.add(Dropout(0.5))
 
 model.add(Dense(len(genres)))
-model.add(Activation("softmax"))
+model.add(Activation("sigmoid"))
 
 opt = rmsprop(lr=0.0001, decay=1e-6)
 
+model.compile(loss="binary_crossentropy", optimizer=opt, metrics=["accuracy"])
+print(model.summary())
 
-model.compile(loss="categorical_crossentropy", optimizer=opt, metrics=["accuracy"])
+training_generator = data_generator(trainX, trainY, BATCH_SIZE)
+validation_generator = data_generator(valX, valY, BATCH_SIZE)
+testing_generator = data_generator(testX, testY, BATCH_SIZE)
 
-training_generator = data_generator(trainX, trainY, BATCH_SIZE, z_num=longest_trailer_length)
-validation_generator = data_generator(valX, valY, BATCH_SIZE, z_num=longest_trailer_length)
-
-model.fit_generator(
+H = model.fit_generator(
     generator = training_generator,
     steps_per_epoch = (TRAIN_SAMPLES // BATCH_SIZE),
     epochs = EPOCHS,
@@ -120,17 +129,31 @@ model.fit_generator(
     max_queue_size = 5
 )
 
-print("[INFO] evaluating network...")
-predictions = model.predict(testX, batch_size=32)
-print(predictions.shape)
-print(testY.shape)
-for i, row in enumerate(predictions):
-    print(predictions[i])
-    print(testY[i])
-    break
-# print(classification_report(testY.argmax(axis=1),
-# 	       predictions.argmax(axis=0), target_names=genres))
+plt.style.use("ggplot")
+plt.figure()
+N = EPOCHS
+plt.plot(np.arange(0, N), H.history["loss"], label="train_loss")
+plt.plot(np.arange(0, N), H.history["val_loss"], label="val_loss")
+plt.plot(np.arange(0, N), H.history["acc"], label="train_acc")
+plt.plot(np.arange(0, N), H.history["val_acc"], label="val_acc")
+plt.title("Training Loss and Accuracy")
+plt.xlabel("Epoch #")
+plt.ylabel("Loss/Accuracy")
+plt.legend(loc="upper left")
+plt.show()
 
-# Store the model on disk.
-#print("[INFO] serializing and storing the model ...")
-#model.save(args["model"])
+print("[INFO] evaluating network...")
+predictions = model.predict_generator(
+    testing_generator, 
+    steps=(TEST_SAMPLES // BATCH_SIZE)+1, 
+    max_queue_size=5, 
+    workers=2, 
+    use_multiprocessing=True, 
+    verbose=1
+)
+counter = 0
+for pred in predictions:
+    print([0 if i < (1/18) else 1 for i in pred])
+    print(testY[counter])
+    input()
+    counter += 1
