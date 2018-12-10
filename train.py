@@ -70,7 +70,7 @@ class data_generator(Sequence):
             
 
             # Pad zeros to the end s.t. the length is the max of the whole set
-            frames.extend([np.zeros(frame_data.shape) for _ in range(self.z_num - len(frames))])
+            #frames.extend([np.zeros(frame_data.shape) for _ in range(self.z_num - len(frames))])
             batch_data.append(frames)
         return np.array(batch_data), np.array(batch_y)
 
