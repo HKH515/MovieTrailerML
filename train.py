@@ -4,67 +4,73 @@ import pandas as pd
 from keras.optimizers import SGD, rmsprop, Adam, Nadam
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, Flatten, Activation
-from keras.layers import Conv2D, MaxPooling2D
+from keras.layers import Conv2D, MaxPooling2D, Conv3D, MaxPooling3D
 from keras.layers.normalization import BatchNormalization
+from keras.utils import Sequence
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import matplotlib.pyplot as plt
 import os
 import cv2
 import csv
+import json
 
-imgs = []
-processed_movies = set()
+class data_generator(Sequence):
+    def __init__(self, ids, labels, batch_size, z_num=10):
+        self.ids, self.labels = ids, labels
+        self.batch_size = batch_size
+        self.z_num = z_num
+    def __len__(self):
+        return int(np.ceil(len(self.ids) / float(self.batch_size)))
+    def __getitem__(self, idx):
+        batch_x = self.ids[idx * self.batch_size:(idx + 1) * self.batch_size]
+        batch_y = self.labels[idx * self.batch_size:(idx + 1) * self.batch_size]
+        batch_data = [] 
+        for movieId in batch_x:
+            frames = []
+            #print("Dealing with movieId {}".format(movieId))
+            for frame in os.listdir("frames/%s" % movieId):
+                frame_data = cv2.imread("frames/%s/%s" % (movieId, frame))
+                frame_data = cv2.resize(frame_data, dsize=(64, 64), interpolation=cv2.INTER_NEAREST)
+                frames.append(frame_data)
+                if len(frames) >= self.z_num:
+                    break
+            batch_data.append(frames)
+        return np.array(batch_data), np.array(batch_y)
 
+with open('frame_info.json', 'r') as f:
+    frame_info = json.load(f)
+
+# get the data
+df = pd.read_csv('preprocessed_movies.csv')
+prune_mask = df['movieId'].isin(frame_info['good'])
+df = df.loc[prune_mask]
+
+genres = df.columns[4:].tolist()
+frame_sequences = []
 labels = []
-# Read frames
 
-movie_to_framecount = {}
+# drop all data not needed for machine learning
+data = df.loc[:,'movieId']
+labels = df.loc[:, genres].values.tolist()
 
-for i, movie in enumerate(os.listdir("frames")):
-    print("processing movie {}/{}".format(i, len(os.listdir("frames"))), end="\r")
-    processed_movies.add(movie)
-    movie_to_framecount[movie] = len(os.listdir("frames/{}".format(movie)))
-    for frame in os.listdir("frames/%s" % movie):
-        frame_data = cv2.imread("frames/%s/%s" % (movie, frame))
-        frame_data = cv2.cvtColor(frame_data, cv2.COLOR_BGR2RGB)
-        frame_data = cv2.resize(frame_data, dsize=(64, 64), interpolation=cv2.INTER_NEAREST)
-        imgs.append(frame_data)
+trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
+trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
 
-genre_lookup = defaultdict(list)
+BATCH_SIZE = 4
+EPOCHS = 5
+TRAIN_SAMPLES = len(trainX)
+VAL_SAMPLES = len(valX)
 
-
-genres = None
-labels = []
-# Read genres, i.e. labels
-with open("preprocessed_movies.csv") as movie_file:
-    reader = csv.DictReader(movie_file)
-
-    for row in reader:
-        if row['movieId'] not in processed_movies:
-            continue
-        if not genres:
-            genres = reader.fieldnames[4:]
-        thisgenre = []
-        for genre in reader.fieldnames[4:]:
-            thisgenre.append(int(row[genre]))
-        for _ in range(movie_to_framecount[row['movieId']]):
-            labels.append(thisgenre)
-
-#print(genre_lookup['1']['Adventure'])
-# labels = genre_lookup.values()
-#print(genre_lookup.keys())
-#print(labels)
-imgs = np.array(imgs)
-labels = np.array(labels)
-
-trainX, testX, trainY, testY = train_test_split(imgs, labels, test_size=0.2, random_state=42)
+# now we have to explicitly state shape of our samples because of generators gah
+# (x, y, z, color)
+train_shape = (10,64,64,3) # maybe it will look like this idno the second to last is the idno part
 
 model = Sequential()
-model.add(Conv2D(32, (3, 3), padding="same",input_shape=trainX.shape[1:]))
+model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
 model.add(Activation("relu"))
 
-model.add(MaxPooling2D(pool_size=(2, 2)))
+model.add(MaxPooling3D(pool_size=(2, 2, 2)))
 model.add(Dropout(0.25))
 
 model.add(Flatten()) # it is important to flatten your 2d tensors to 1d when going to FC-layers
@@ -76,16 +82,25 @@ model.add(Dropout(0.5))
 model.add(Dense(len(genres)))
 model.add(Activation("softmax"))
 
-
-EPOCHS = 5
-
-print(len(labels[0]))
 opt = rmsprop(lr=0.0001, decay=1e-6)
 
 model.compile(loss="categorical_crossentropy", optimizer=opt, metrics=["accuracy"])
 
-# Now train the ANN ...
-H = model.fit(trainX, trainY, validation_data=(testX, testY), epochs=EPOCHS, batch_size=32)
+training_generator = data_generator(trainX, trainY, BATCH_SIZE)
+validation_generator = data_generator(valX, valY, BATCH_SIZE)
+
+model.fit_generator(
+    generator = training_generator,
+    steps_per_epoch = (TRAIN_SAMPLES // BATCH_SIZE),
+    epochs = EPOCHS,
+    verbose = 1,
+    validation_data = validation_generator,
+    validation_steps = (VAL_SAMPLES // BATCH_SIZE),
+    use_multiprocessing = True,
+    workers = 2,
+    max_queue_size = 5
+)
+
 print("[INFO] evaluating network...")
 predictions = model.predict(testX, batch_size=32)
 print(predictions.shape)
