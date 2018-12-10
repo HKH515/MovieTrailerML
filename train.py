@@ -27,12 +27,33 @@ def longest_trailer(frame_info):
     return max_k, max_v
 
 class data_generator(Sequence):
-    def __init__(self, ids, labels, batch_size, z_num=10):
+    """ Handles generating data for Keras at runtime
+    so that we don't have to load all the data before 
+    starting to train but rather just load the data 
+    for each epoch right before we start to train
+    """
+    def __init__(self, ids, labels, batch_size, z_num=10, n_slices=0):
         self.ids, self.labels = ids, labels
         self.batch_size = batch_size
         self.z_num = z_num
+        self.n_slices = n_slices
     def __len__(self):
-        return int(np.ceil(len(self.ids) / float(self.batch_size)))
+        """
+            This function should return how many batch sizes 
+            worth of data your data generator should return 
+
+            ex: 
+                9 batch size
+                100 datapoints
+                len(generator) = 11
+
+            In our case for slicing each trailer into multiple 
+            data points this becomes difficult as we cant just 
+            use the amount of ids but we need to find a way to 
+            slice all the trailers into equal parts and count 
+            the batch sizes correctly
+        """
+        return self.n_slices
     def __getitem__(self, idx):
         batch_x = self.ids[idx * self.batch_size:(idx + 1) * self.batch_size]
         batch_y = self.labels[idx * self.batch_size:(idx + 1) * self.batch_size]
@@ -77,10 +98,15 @@ else:
     labels = df.loc[:, genres].values.tolist()
 
 # find longest trailer
-longest_trailer_movieId, longest_trailer_length = longest_trailer(frame_info)
+#longest_trailer_movieId, longest_trailer_length = longest_trailer(frame_info)
+longest_trailer_length = 10
 
 trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
 trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
+
+total_trainX_slices = int(np.ceil(sum([frame_info['good'][movieId] for movieId in trainX])/longest_trailer_length))
+total_valX_slices = int(np.ceil(sum([frame_info['good'][movieId] for movieId in valX])/longest_trailer_length))
+total_testX_slices = int(np.ceil(sum([frame_info['good'][movieId] for movieId in testX])/longest_trailer_length))
 
 BATCH_SIZE = 3
 EPOCHS = 2
@@ -113,9 +139,9 @@ opt = rmsprop(lr=0.0001, decay=1e-6)
 model.compile(loss="binary_crossentropy", optimizer=opt, metrics=["accuracy"])
 print(model.summary())
 
-training_generator = data_generator(trainX, trainY, BATCH_SIZE)
-validation_generator = data_generator(valX, valY, BATCH_SIZE)
-testing_generator = data_generator(testX, testY, BATCH_SIZE)
+training_generator = data_generator(trainX, trainY, BATCH_SIZE, z_num=longest_trailer_length, n_slices=total_testX_slices)
+validation_generator = data_generator(valX, valY, BATCH_SIZE, z_num=longest_trailer_length, n_slices=total_valX_slices)
+testing_generator = data_generator(testX, testY, BATCH_SIZE, z_num=longest_trailer_length, n_slices=total_testX_slices)
 
 H = model.fit_generator(
     generator = training_generator,
