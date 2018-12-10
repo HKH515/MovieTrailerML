@@ -15,6 +15,17 @@ import cv2
 import csv
 import json
 
+def longest_trailer(frame_info):
+    max_v = 0
+    max_k = None
+    for movieId in os.listdir("frames"):
+        print(os.listdir("frames/%s" % movieId))
+        candidate_v = len(os.listdir("frames/%s" % movieId))
+        if candidate_v > max_v and movieId in frame_info['good']:
+            max_v = candidate_v
+            max_k = movieId
+    return max_k, max_v
+
 class data_generator(Sequence):
     def __init__(self, ids, labels, batch_size, z_num=10):
         self.ids, self.labels = ids, labels
@@ -35,6 +46,10 @@ class data_generator(Sequence):
                 frames.append(frame_data)
                 if len(frames) >= self.z_num:
                     break
+            
+
+            # Pad zeros to the end s.t. the length is the max of the whole set
+            frames.extend([np.zeros(frame_data.shape) for _ in range(self.z_num - len(frames))])
             batch_data.append(frames)
         return np.array(batch_data), np.array(batch_y)
 
@@ -61,6 +76,9 @@ else:
     data = df.loc[:,'movieId']
     labels = df.loc[:, genres].values.tolist()
 
+# find longest trailer
+longest_trailer_movieId, longest_trailer_length = longest_trailer(frame_info)
+
 trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
 trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
 
@@ -72,7 +90,7 @@ TEST_SAMPLES = len(testX)
 
 # now we have to explicitly state shape of our samples because of generators gah
 # (x, y, z, color)
-train_shape = (10,64,64,3) # maybe it will look like this idno the second to last is the idno part
+train_shape = (longest_trailer_length,64,64,3) # maybe it will look like this idno the second to last is the idno part
 
 model = Sequential()
 model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
