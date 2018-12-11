@@ -15,45 +15,13 @@ import cv2
 import csv
 import json
 
-def longest_trailer(frame_info):
-    max_v = 0
-    max_k = None
-    for movieId in os.listdir("frames"):
-        print(os.listdir("frames/%s" % movieId))
-        candidate_v = len(os.listdir("frames/%s" % movieId))
-        if candidate_v > max_v and movieId in frame_info['good']:
-            max_v = candidate_v
-            max_k = movieId
-    return max_k, max_v
-
 class data_generator(Sequence):
-    """ Handles generating data for Keras at runtime
-    so that we don't have to load all the data before 
-    starting to train but rather just load the data 
-    for each epoch right before we start to train
-    """
-    def __init__(self, ids, labels, batch_size, z_num=10, n_slices=0):
+    def __init__(self, ids, labels, batch_size, z_num=10):
         self.ids, self.labels = ids, labels
         self.batch_size = batch_size
         self.z_num = z_num
-        self.n_slices = n_slices
     def __len__(self):
-        """
-            This function should return how many batch sizes 
-            worth of data your data generator should return 
-
-            ex: 
-                9 batch size
-                100 datapoints
-                len(generator) = 11
-
-            In our case for slicing each trailer into multiple 
-            data points this becomes difficult as we cant just 
-            use the amount of ids but we need to find a way to 
-            slice all the trailers into equal parts and count 
-            the batch sizes correctly
-        """
-        return self.n_slices
+        return int(np.ceil(len(self.ids) / float(self.batch_size)))
     def __getitem__(self, idx):
         batch_x = self.ids[idx * self.batch_size:(idx + 1) * self.batch_size]
         batch_y = self.labels[idx * self.batch_size:(idx + 1) * self.batch_size]
@@ -67,10 +35,6 @@ class data_generator(Sequence):
                 frames.append(frame_data)
                 if len(frames) >= self.z_num:
                     break
-            
-
-            # Pad zeros to the end s.t. the length is the max of the whole set
-            #frames.extend([np.zeros(frame_data.shape) for _ in range(self.z_num - len(frames))])
             batch_data.append(frames)
         return np.array(batch_data), np.array(batch_y)
 
@@ -78,11 +42,16 @@ with open('frame_info.json', 'r') as f:
     frame_info = json.load(f)
 
 # get the data
-df = pd.read_csv('preprocessed_movies.csv')
-prune_mask = df['movieId'].isin(frame_info['good'])
+df = pd.read_csv('smalldf.csv')
+movieids = [f[0] for f in frame_info['good']]
+prune_mask = df['movieId'].isin(movieids)
 df = df.loc[prune_mask]
 
 genres = df.columns[4:].tolist()
+print(df.columns)
+print(df.columns[4:])
+str_length = max(len(x) for x in genres)
+sep_length = len(genres) * str_length
 frame_sequences = []
 labels = []
 
@@ -97,26 +66,18 @@ else:
     data = df.loc[:,'movieId']
     labels = df.loc[:, genres].values.tolist()
 
-# find longest trailer
-#longest_trailer_movieId, longest_trailer_length = longest_trailer(frame_info)
-longest_trailer_length = 10
-
 trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
 trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
 
-total_trainX_slices = int(np.ceil(sum([frame_info['good'][movieId] for movieId in trainX])/longest_trailer_length))
-total_valX_slices = int(np.ceil(sum([frame_info['good'][movieId] for movieId in valX])/longest_trailer_length))
-total_testX_slices = int(np.ceil(sum([frame_info['good'][movieId] for movieId in testX])/longest_trailer_length))
-
-BATCH_SIZE = 3
-EPOCHS = 2
+BATCH_SIZE = 64
+EPOCHS = 10
 TRAIN_SAMPLES = len(trainX)
 VAL_SAMPLES = len(valX)
 TEST_SAMPLES = len(testX)
 
 # now we have to explicitly state shape of our samples because of generators gah
 # (x, y, z, color)
-train_shape = (longest_trailer_length,64,64,3) # maybe it will look like this idno the second to last is the idno part
+train_shape = (10,64,64,3) # maybe it will look like this idno the second to last is the idno part
 
 model = Sequential()
 model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
@@ -125,8 +86,26 @@ model.add(Activation("relu"))
 model.add(MaxPooling3D(pool_size=(2, 2, 2)))
 model.add(Dropout(0.25))
 
+model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Activation("relu"))
+model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Activation("relu"))
+
+model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+model.add(Dropout(0.25))
+
+model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Activation("relu"))
+model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Activation("relu"))
+model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Activation("relu"))
+
+model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+model.add(Dropout(0.25))
+
 model.add(Flatten()) # it is important to flatten your 2d tensors to 1d when going to FC-layers
-model.add(Dense(32, bias_initializer='ones'))
+model.add(Dense(128, bias_initializer='ones'))
 model.add(Activation("relu"))
 model.add(BatchNormalization())
 model.add(Dropout(0.5))
@@ -139,9 +118,9 @@ opt = rmsprop(lr=0.0001, decay=1e-6)
 model.compile(loss="binary_crossentropy", optimizer=opt, metrics=["accuracy"])
 print(model.summary())
 
-training_generator = data_generator(trainX, trainY, BATCH_SIZE, z_num=longest_trailer_length, n_slices=total_testX_slices)
-validation_generator = data_generator(valX, valY, BATCH_SIZE, z_num=longest_trailer_length, n_slices=total_valX_slices)
-testing_generator = data_generator(testX, testY, BATCH_SIZE, z_num=longest_trailer_length, n_slices=total_testX_slices)
+training_generator = data_generator(trainX, trainY, BATCH_SIZE)
+validation_generator = data_generator(valX, valY, BATCH_SIZE)
+testing_generator = data_generator(testX, testY, BATCH_SIZE)
 
 H = model.fit_generator(
     generator = training_generator,
@@ -150,8 +129,8 @@ H = model.fit_generator(
     verbose = 1,
     validation_data = validation_generator,
     validation_steps = (VAL_SAMPLES // BATCH_SIZE),
-    use_multiprocessing = True,
-    workers = 2,
+    use_multiprocessing = False,
+    workers = 1,
     max_queue_size = 5
 )
 
@@ -173,13 +152,16 @@ predictions = model.predict_generator(
     testing_generator, 
     steps=(TEST_SAMPLES // BATCH_SIZE)+1, 
     max_queue_size=5, 
-    workers=2, 
-    use_multiprocessing=True, 
+    workers=1, 
+    use_multiprocessing=False, 
     verbose=1
 )
 counter = 0
 for pred in predictions:
-    print([0 if i < (1/18) else 1 for i in pred])
-    print(testY[counter])
-    input()
+    proba = pred
+    #idxs = np.argsort(proba)[::-1][:2]
+    print(" ".join([s.rjust(str_length) for s in genres]))
+    print(" ".join([("{:.2f}".format(p*100)).rjust(str_length) for p in proba]))
+    print(" ".join([str(v).rjust(str_length) for v in testY[counter]]))
+    print("="*sep_length)
     counter += 1
