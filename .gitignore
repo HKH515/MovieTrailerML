@@ -107,3 +107,4 @@ venv.bak/
 # data files
 /frames
 /data
+frame_info.json
