@@ -14,6 +14,16 @@ import os
 import cv2
 import csv
 import json
+import sys
+# its win32, maybe there is win64 too?
+is_windows = sys.platform.startswith('win')
+
+MULTI_THREAD = True
+THREADS = 2
+if is_windows:
+    MULTI_THREAD = False
+    THREADS = 1
+
 
 class data_generator(Sequence):
     def __init__(self, ids, labels, batch_size, z_num=10):
@@ -25,7 +35,7 @@ class data_generator(Sequence):
     def __getitem__(self, idx):
         batch_x = self.ids[idx * self.batch_size:(idx + 1) * self.batch_size]
         batch_y = self.labels[idx * self.batch_size:(idx + 1) * self.batch_size]
-        batch_data = [] 
+        batch_data = []
         for movieId in batch_x:
             frames = []
             #print("Dealing with movieId {}".format(movieId))
@@ -42,7 +52,7 @@ with open('frame_info.json', 'r') as f:
     frame_info = json.load(f)
 
 # get the data
-df = pd.read_csv('smalldf.csv')
+df = pd.read_csv('preprocessed_movies.csv')
 movieids = [f[0] for f in frame_info['good']]
 prune_mask = df['movieId'].isin(movieids)
 df = df.loc[prune_mask]
@@ -55,8 +65,8 @@ sep_length = len(genres) * str_length
 frame_sequences = []
 labels = []
 
-AMOUNT_TO_TRAIN = 1000
-LIMIT_TRAIN_SET = False
+AMOUNT_TO_TRAIN = 40
+LIMIT_TRAIN_SET = True
 
 # drop all data not needed for machine learning
 if LIMIT_TRAIN_SET:
@@ -69,8 +79,8 @@ else:
 trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
 trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
 
-BATCH_SIZE = 64
-EPOCHS = 10
+BATCH_SIZE = 4
+EPOCHS = 2
 TRAIN_SAMPLES = len(trainX)
 VAL_SAMPLES = len(valX)
 TEST_SAMPLES = len(testX)
@@ -84,7 +94,8 @@ model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
 model.add(Activation("relu"))
 
 model.add(MaxPooling3D(pool_size=(2, 2, 2)))
-model.add(Dropout(0.25))
+#model.add(Dropout(0.25))
+model.add(BatchNormalization())
 
 model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
 model.add(Activation("relu"))
@@ -92,7 +103,8 @@ model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
 model.add(Activation("relu"))
 
 model.add(MaxPooling3D(pool_size=(2, 2, 2)))
-model.add(Dropout(0.25))
+#model.add(Dropout(0.25))
+model.add(BatchNormalization())
 
 model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
 model.add(Activation("relu"))
@@ -102,14 +114,19 @@ model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
 model.add(Activation("relu"))
 
 model.add(MaxPooling3D(pool_size=(2, 2, 2)))
-model.add(Dropout(0.25))
+#model.add(Dropout(0.25))
+model.add(BatchNormalization())
 
 model.add(Flatten()) # it is important to flatten your 2d tensors to 1d when going to FC-layers
-model.add(Dense(128, bias_initializer='ones'))
+model.add(Dense(1024, bias_initializer='ones'))
 model.add(Activation("relu"))
 model.add(BatchNormalization())
-model.add(Dropout(0.5))
+#model.add(Dropout(0.5))
+model.add(Dense(1024, bias_initializer='ones'))
+model.add(Activation("relu"))
+model.add(BatchNormalization())
 
+model.add(BatchNormalization())
 model.add(Dense(len(genres)))
 model.add(Activation("sigmoid"))
 
@@ -122,6 +139,7 @@ training_generator = data_generator(trainX, trainY, BATCH_SIZE)
 validation_generator = data_generator(valX, valY, BATCH_SIZE)
 testing_generator = data_generator(testX, testY, BATCH_SIZE)
 
+
 H = model.fit_generator(
     generator = training_generator,
     steps_per_epoch = (TRAIN_SAMPLES // BATCH_SIZE),
@@ -129,8 +147,8 @@ H = model.fit_generator(
     verbose = 1,
     validation_data = validation_generator,
     validation_steps = (VAL_SAMPLES // BATCH_SIZE),
-    use_multiprocessing = False,
-    workers = 1,
+    use_multiprocessing = MULTI_THREAD,
+    workers = THREADS,
     max_queue_size = 5
 )
 
@@ -149,15 +167,17 @@ plt.show()
 
 print("[INFO] evaluating network...")
 predictions = model.predict_generator(
-    testing_generator, 
-    steps=(TEST_SAMPLES // BATCH_SIZE)+1, 
-    max_queue_size=5, 
-    workers=1, 
-    use_multiprocessing=False, 
+    testing_generator,
+    steps=(TEST_SAMPLES // BATCH_SIZE)+1,
+    max_queue_size=5,
+    workers=THREADS,
+    use_multiprocessing=MULTI_THREAD,
     verbose=1
 )
 counter = 0
 for pred in predictions:
+    if counter >= len(predictions):
+        break
     proba = pred
     #idxs = np.argsort(proba)[::-1][:2]
     print(" ".join([s.rjust(str_length) for s in genres]))
