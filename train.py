@@ -154,20 +154,20 @@ model.add(MaxPooling3D(pool_size=(2, 2, 2)))
 #model.add(Dropout(0.25))
 model.add(BatchNormalization())
 
-model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Conv3D(32, (3, 3, 3), padding="same"))
 model.add(Activation("relu"))
-model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Conv3D(32, (3, 3, 3), padding="same"))
 model.add(Activation("relu"))
 
 model.add(MaxPooling3D(pool_size=(2, 2, 2)))
 #model.add(Dropout(0.25))
 model.add(BatchNormalization())
 
-model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Conv3D(32, (3, 3, 3), padding="same"))
 model.add(Activation("relu"))
-model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Conv3D(32, (3, 3, 3), padding="same"))
 model.add(Activation("relu"))
-model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Conv3D(32, (3, 3, 3), padding="same"))
 model.add(Activation("relu"))
 
 model.add(MaxPooling3D(pool_size=(2, 2, 2)))
@@ -183,7 +183,6 @@ model.add(Dense(1024, bias_initializer='ones'))
 model.add(Activation("relu"))
 model.add(BatchNormalization())
 
-model.add(BatchNormalization())
 model.add(Dense(len(genres)))
 model.add(Activation("sigmoid"))
 
@@ -208,7 +207,7 @@ H = model.fit_generator(
     validation_steps = (VAL_SAMPLES // BATCH_SIZE),
     use_multiprocessing = MULTI_THREAD,
     workers = THREADS,
-    max_queue_size = 5
+    max_queue_size = 100
 )
 
 plt.style.use("ggplot")
