@@ -65,7 +65,7 @@ sep_length = len(genres) * str_length
 frame_sequences = []
 labels = []
 
-AMOUNT_TO_TRAIN = 40
+AMOUNT_TO_TRAIN = 100
 LIMIT_TRAIN_SET = True
 
 # drop all data not needed for machine learning
@@ -97,20 +97,20 @@ model.add(MaxPooling3D(pool_size=(2, 2, 2)))
 #model.add(Dropout(0.25))
 model.add(BatchNormalization())
 
-model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Conv3D(32, (3, 3, 3), padding="same"))
 model.add(Activation("relu"))
-model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Conv3D(32, (3, 3, 3), padding="same"))
 model.add(Activation("relu"))
 
 model.add(MaxPooling3D(pool_size=(2, 2, 2)))
 #model.add(Dropout(0.25))
 model.add(BatchNormalization())
 
-model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Conv3D(32, (3, 3, 3), padding="same"))
 model.add(Activation("relu"))
-model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Conv3D(32, (3, 3, 3), padding="same"))
 model.add(Activation("relu"))
-model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+model.add(Conv3D(32, (3, 3, 3), padding="same"))
 model.add(Activation("relu"))
 
 model.add(MaxPooling3D(pool_size=(2, 2, 2)))
@@ -126,7 +126,6 @@ model.add(Dense(1024, bias_initializer='ones'))
 model.add(Activation("relu"))
 model.add(BatchNormalization())
 
-model.add(BatchNormalization())
 model.add(Dense(len(genres)))
 model.add(Activation("sigmoid"))
 
@@ -149,7 +148,7 @@ H = model.fit_generator(
     validation_steps = (VAL_SAMPLES // BATCH_SIZE),
     use_multiprocessing = MULTI_THREAD,
     workers = THREADS,
-    max_queue_size = 5
+    max_queue_size = 100
 )
 
 plt.style.use("ggplot")
@@ -166,22 +165,22 @@ plt.legend(loc="upper left")
 plt.show()
 
 print("[INFO] evaluating network...")
-predictions = model.predict_generator(
-    testing_generator,
-    steps=(TEST_SAMPLES // BATCH_SIZE)+1,
-    max_queue_size=5,
-    workers=THREADS,
-    use_multiprocessing=MULTI_THREAD,
-    verbose=1
-)
-counter = 0
-for pred in predictions:
-    if counter >= len(predictions):
-        break
-    proba = pred
-    #idxs = np.argsort(proba)[::-1][:2]
-    print(" ".join([s.rjust(str_length) for s in genres]))
-    print(" ".join([("{:.2f}".format(p*100)).rjust(str_length) for p in proba]))
-    print(" ".join([str(v).rjust(str_length) for v in testY[counter]]))
-    print("="*sep_length)
-    counter += 1
+#predictions = model.predict_generator(
+#    testing_generator,
+#    steps=(TEST_SAMPLES // BATCH_SIZE)+1,
+#    max_queue_size=5,
+#    workers=THREADS,
+#    use_multiprocessing=MULTI_THREAD,
+#    verbose=1
+#)
+#counter = 0
+#for pred in predictions:
+#    if counter >= len(predictions):
+#        break
+#    proba = pred
+#    #idxs = np.argsort(proba)[::-1][:2]
+#    print(" ".join([s.rjust(str_length) for s in genres]))
+#    print(" ".join([("{:.2f}".format(p*100)).rjust(str_length) for p in proba]))
+#    print(" ".join([str(v).rjust(str_length) for v in testY[counter]]))
+#    print("="*sep_length)
+#    counter += 1
