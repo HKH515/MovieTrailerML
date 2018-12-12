@@ -15,6 +15,9 @@ import cv2
 import csv
 import json
 import sys
+import keras.backend as K
+import tensorflow as tf
+
 # its win32, maybe there is win64 too?
 is_windows = sys.platform.startswith('win')
 
@@ -24,7 +27,59 @@ if is_windows:
     MULTI_THREAD = False
     THREADS = 1
 
+def threshold_accuracy(y_true, y_pred):
+    """
+    Each prediction is considered invalid if the confidence lies between the interval (0.5-threshold, 0.5+threshold).
+    Returns (valid correct predictions / valid predictions)
+    """
+    threshold = 0.25
+    lower_threshold = 0.5-threshold
+    upper_threshold = 0.5+threshold
 
+    valid_filter = lambda v: v[np.where(np.logical_or(v < lower_threshold, v > upper_threshold))]
+
+
+    y_pred_valid = tf.py_func(valid_filter, [y_pred], tf.float32)
+    y_pred_rounded = tf.to_float(K.round(y_pred))
+    y_true = tf.to_float(y_true)
+    y_diff = K.equal(y_true, y_pred_rounded)
+    y_diff = tf.cast(y_diff, tf.float32)
+
+    return K.sum(y_diff)/K.sum(K.ones_like(y_pred_valid))
+
+def threshold_accuracy_lists(y_true, y_pred):
+    threshold = 0.25
+    lower_threshold = 0.5-threshold
+    upper_threshold = 0.5+threshold
+
+    valid_preds = [i for i,v in enumerate(y_pred) if v < lower_threshold or v > upper_threshold]
+    corrects = [i for i in valid_preds if round(valid_preds[i]) == y_true[i]]
+    return len(corrects)/len(valid_preds)
+
+def threshold_accuracy_2d_lists(y_true, y_pred):
+    print(y_true)
+    threshold = 0.25
+    lower_threshold = 0.5-threshold
+    upper_threshold = 0.5+threshold
+    correct = 0
+    total = 0
+    
+    for i in range(len(y_true)):
+        for j in range(len(y_true[i])):
+            p = y_pred[i,j]
+            if p < lower_threshold or p > upper_threshold:
+                if round(p) == y_true[i][j]:
+                    correct += 1
+                total += 1
+    if total == 0:
+        return "now you fucked up"
+    return correct/total
+
+
+t_y_true = tf.constant([0, 1, 0])
+t_y_pred = tf.constant([0.23, 0.1, 0.1])
+
+print(threshold_accuracy(t_y_true, t_y_pred))
 class data_generator(Sequence):
     def __init__(self, ids, labels, batch_size, z_num=10):
         self.ids, self.labels = ids, labels
@@ -65,7 +120,7 @@ sep_length = len(genres) * str_length
 frame_sequences = []
 labels = []
 
-AMOUNT_TO_TRAIN = 100
+AMOUNT_TO_TRAIN = 3000
 LIMIT_TRAIN_SET = True
 
 # drop all data not needed for machine learning
@@ -165,14 +220,14 @@ plt.legend(loc="upper left")
 plt.show()
 
 print("[INFO] evaluating network...")
-#predictions = model.predict_generator(
-#    testing_generator,
-#    steps=(TEST_SAMPLES // BATCH_SIZE)+1,
-#    max_queue_size=5,
-#    workers=THREADS,
-#    use_multiprocessing=MULTI_THREAD,
-#    verbose=1
-#)
+predictions = model.predict_generator(
+    testing_generator,
+    steps=(TEST_SAMPLES // BATCH_SIZE)+1,
+    max_queue_size=5,
+    workers=THREADS,
+    use_multiprocessing=MULTI_THREAD,
+    verbose=1
+)
 #counter = 0
 #for pred in predictions:
 #    if counter >= len(predictions):
@@ -184,3 +239,10 @@ print("[INFO] evaluating network...")
 #    print(" ".join([str(v).rjust(str_length) for v in testY[counter]]))
 #    print("="*sep_length)
 #    counter += 1
+
+
+
+#metric = sum([threshold_accuracy_lists(v, predictions[i]) for i, v in enumerate(testY)])/len(testY)
+metric2 = threshold_accuracy_2d_lists(testY, predictions)
+#print("Threshold accuracy: {}".format(metric))
+print("2D Threshold accuracy: {}".format(metric2))
