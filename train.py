@@ -2,7 +2,7 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 from keras.optimizers import SGD, rmsprop, Adam, Nadam
-from keras.models import Sequential
+from keras.models import Sequential, load_model
 from keras.layers import Dense, Dropout, Flatten, Activation
 from keras.layers import Conv2D, MaxPooling2D, Conv3D, MaxPooling3D
 from keras.layers.normalization import BatchNormalization
@@ -17,6 +17,10 @@ import json
 import sys
 import keras.backend as K
 import tensorflow as tf
+import datetime
+import argparse
+from subprocess import call
+
 
 # its win32, maybe there is win64 too?
 is_windows = sys.platform.startswith('win')
@@ -26,6 +30,12 @@ THREADS = 2
 if is_windows:
     MULTI_THREAD = False
     THREADS = 1
+
+
+# FOR NOW THIS CONSTANT IS NON DYNAMIC BASED ON LOADED MODEL
+# PROBABLY SHOULD DO STUFF TO MAKE IT DYNAMIC IN THE PROCESS 
+# YT LINK FUNCTION!
+SLICE_SIZE = 10
 
 def threshold_accuracy(y_true, y_pred):
     """
@@ -57,29 +67,38 @@ def threshold_accuracy_lists(y_true, y_pred):
     return len(corrects)/len(valid_preds)
 
 def threshold_accuracy_2d_lists(y_true, y_pred):
-    print(y_true)
     threshold = 0.25
     lower_threshold = 0.5-threshold
     upper_threshold = 0.5+threshold
     correct = 0
     total = 0
-    
+    incorrect = 0
+    non_guesses = 0
     for i in range(len(y_true)):
         for j in range(len(y_true[i])):
             p = y_pred[i,j]
             if p < lower_threshold or p > upper_threshold:
                 if round(p) == y_true[i][j]:
                     correct += 1
+                else:
+                    incorrect += 1
                 total += 1
+            else:
+                non_guesses += 1
     if total == 0:
-        return "now you fucked up"
-    return correct/total
+        return "The model made no guesses"
+    return "Percent correct {} | Correct {} | Incorrect {} | Precent Guessed {} | guesses {} | non-guesses {} ".format(correct/total, 
+                                                                                                                       correct, 
+                                                                                                                       incorrect, 
+                                                                                                                       total/(len(y_true) * len(y_true[0])), 
+                                                                                                                       total, 
+                                                                                                                       non_guesses)
 
 
-t_y_true = tf.constant([0, 1, 0])
-t_y_pred = tf.constant([0.23, 0.1, 0.1])
+#t_y_true = tf.constant([0, 1, 0])
+#t_y_pred = tf.constant([0.23, 0.1, 0.1])
 
-print(threshold_accuracy(t_y_true, t_y_pred))
+#print(threshold_accuracy(t_y_true, t_y_pred))
 class data_generator(Sequence):
     def __init__(self, ids, labels, batch_size, z_num=10):
         self.ids, self.labels = ids, labels
@@ -149,159 +168,228 @@ class slice_generator(Sequence):
             slice_map.append(curr_batch)
         return slice_map
 
+def train_new():
+    with open('frame_info.json', 'r') as f:
+        frame_info = json.load(f)
 
-with open('frame_info.json', 'r') as f:
-    frame_info = json.load(f)
+    # get the data
+    df = pd.read_csv('preprocessed_movies.csv')
+    movieids = [f[0] for f in frame_info['good']]
+    prune_mask = df['movieId'].isin(movieids)
+    df = df.loc[prune_mask]
+    df['movieId'] = pd.to_numeric(df['movieId'])
 
-# get the data
-df = pd.read_csv('preprocessed_movies.csv')
-movieids = [f[0] for f in frame_info['good']]
-prune_mask = df['movieId'].isin(movieids)
-df = df.loc[prune_mask]
-df['movieId'] = pd.to_numeric(df['movieId'])
+    genres = df.columns[4:].tolist()
+    print(df.columns)
+    print(df.columns[4:])
+    str_length = max(len(x) for x in genres)
+    sep_length = len(genres) * str_length + len(genres)-1
+    frame_sequences = []
+    labels = []
 
-genres = df.columns[4:].tolist()
-print(df.columns)
-print(df.columns[4:])
-str_length = max(len(x) for x in genres)
-sep_length = len(genres) * str_length + len(genres)-1
-frame_sequences = []
-labels = []
+    AMOUNT_TO_TRAIN = 3000
+    LIMIT_TRAIN_SET = False
 
-AMOUNT_TO_TRAIN = 3000
-LIMIT_TRAIN_SET = True
+    # drop all data not needed for machine learning
+    if LIMIT_TRAIN_SET:
+        data = df.loc[:AMOUNT_TO_TRAIN,'movieId']
+        labels = df.loc[:AMOUNT_TO_TRAIN, genres].values.tolist()
+    else:
+        data = df.loc[:,'movieId']
+        labels = df.loc[:, genres].values.tolist()
 
-# drop all data not needed for machine learning
-if LIMIT_TRAIN_SET:
-    data = df.loc[:AMOUNT_TO_TRAIN,'movieId']
-    labels = df.loc[:AMOUNT_TO_TRAIN, genres].values.tolist()
-else:
-    data = df.loc[:,'movieId']
-    labels = df.loc[:, genres].values.tolist()
+    # movieid lable dict (needed for the slice generator)
+    movieId_label_dict = dict(zip(data,labels))
 
-# movieid lable dict (needed for the slice generator)
-movieId_label_dict = dict(zip(data,labels))
+    # movieid to amount of slices
+    movieId_sliceN_dict = {}
+    for mid, fcount in frame_info['good']:
+        movieId_sliceN_dict[int(mid)] = int(np.ceil(fcount/np.float(SLICE_SIZE)))
 
-# movieid to amount of slices
-SLICE_SIZE = 10
-movieId_sliceN_dict = {}
-for mid, fcount in frame_info['good']:
-    movieId_sliceN_dict[int(mid)] = int(np.ceil(fcount/np.float(SLICE_SIZE)))
+    trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
+    trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
 
-trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
-trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
+    BATCH_SIZE = 64
+    EPOCHS = 10
+    TRAIN_SAMPLES = len(trainX)
+    VAL_SAMPLES = len(valX)
+    TEST_SAMPLES = len(testX)
 
-BATCH_SIZE = 32
-EPOCHS = 5
-TRAIN_SAMPLES = len(trainX)
-VAL_SAMPLES = len(valX)
-TEST_SAMPLES = len(testX)
+    # now we have to explicitly state shape of our samples because of generators gah
+    # (x, y, z, color)
+    train_shape = (SLICE_SIZE,64,64,3) # maybe it will look like this idno the second to last is the idno part
 
-# now we have to explicitly state shape of our samples because of generators gah
-# (x, y, z, color)
-train_shape = (10,64,64,3) # maybe it will look like this idno the second to last is the idno part
+    model = Sequential()
+    model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+    model.add(Activation("relu"))
 
-model = Sequential()
-model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
-model.add(Activation("relu"))
+    model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+    #model.add(Dropout(0.25))
+    model.add(BatchNormalization())
 
-model.add(MaxPooling3D(pool_size=(2, 2, 2)))
-#model.add(Dropout(0.25))
-model.add(BatchNormalization())
+    model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    model.add(Activation("relu"))
+    model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    model.add(Activation("relu"))
 
-model.add(Conv3D(32, (3, 3, 3), padding="same"))
-model.add(Activation("relu"))
-model.add(Conv3D(32, (3, 3, 3), padding="same"))
-model.add(Activation("relu"))
+    model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+    #model.add(Dropout(0.25))
+    model.add(BatchNormalization())
 
-model.add(MaxPooling3D(pool_size=(2, 2, 2)))
-#model.add(Dropout(0.25))
-model.add(BatchNormalization())
+    model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    model.add(Activation("relu"))
+    model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    model.add(Activation("relu"))
+    model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    model.add(Activation("relu"))
 
-model.add(Conv3D(32, (3, 3, 3), padding="same"))
-model.add(Activation("relu"))
-model.add(Conv3D(32, (3, 3, 3), padding="same"))
-model.add(Activation("relu"))
-model.add(Conv3D(32, (3, 3, 3), padding="same"))
-model.add(Activation("relu"))
+    model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+    #model.add(Dropout(0.25))
+    model.add(BatchNormalization())
 
-model.add(MaxPooling3D(pool_size=(2, 2, 2)))
-#model.add(Dropout(0.25))
-model.add(BatchNormalization())
+    model.add(Flatten()) # it is important to flatten your 2d tensors to 1d when going to FC-layers
+    model.add(Dense(1024, bias_initializer='ones'))
+    model.add(Activation("relu"))
+    model.add(BatchNormalization())
+    #model.add(Dropout(0.5))
+    model.add(Dense(1024, bias_initializer='ones'))
+    model.add(Activation("relu"))
+    model.add(BatchNormalization())
+    model.add(Dense(1024, bias_initializer='ones'))
+    model.add(Activation("relu"))
+    model.add(BatchNormalization())
 
-model.add(Flatten()) # it is important to flatten your 2d tensors to 1d when going to FC-layers
-model.add(Dense(1024, bias_initializer='ones'))
-model.add(Activation("relu"))
-model.add(BatchNormalization())
-#model.add(Dropout(0.5))
-model.add(Dense(1024, bias_initializer='ones'))
-model.add(Activation("relu"))
-model.add(BatchNormalization())
+    model.add(Dense(len(genres)))
+    model.add(Activation("sigmoid"))
 
-model.add(Dense(len(genres)))
-model.add(Activation("sigmoid"))
+    opt = rmsprop(lr=0.0001, decay=1e-6)
 
-opt = rmsprop(lr=0.0001, decay=1e-6)
+    model.compile(loss="binary_crossentropy", optimizer=opt, metrics=["accuracy"])
+    print(model.summary())
 
-model.compile(loss="binary_crossentropy", optimizer=opt, metrics=["accuracy"])
-print(model.summary())
+    #training_generator = data_generator(trainX, trainY, BATCH_SIZE)
+    #validation_generator = data_generator(valX, valY, BATCH_SIZE)
+    #testing_generator = data_generator(testX, testY, BATCH_SIZE)
+    training_generator = slice_generator(trainX, trainY, BATCH_SIZE, movieId_sliceN_dict, movieId_label_dict,SLICE_SIZE)
+    validation_generator = slice_generator(valX, valY, BATCH_SIZE, movieId_sliceN_dict, movieId_label_dict,SLICE_SIZE)
+    testing_generator = slice_generator(testX, testY, BATCH_SIZE, movieId_sliceN_dict, movieId_label_dict,SLICE_SIZE)
 
-#training_generator = data_generator(trainX, trainY, BATCH_SIZE)
-#validation_generator = data_generator(valX, valY, BATCH_SIZE)
-#testing_generator = data_generator(testX, testY, BATCH_SIZE)
-training_generator = slice_generator(trainX, trainY, BATCH_SIZE, movieId_sliceN_dict, movieId_label_dict,SLICE_SIZE)
-validation_generator = slice_generator(valX, valY, BATCH_SIZE, movieId_sliceN_dict, movieId_label_dict,SLICE_SIZE)
-testing_generator = slice_generator(testX, testY, BATCH_SIZE, movieId_sliceN_dict, movieId_label_dict,SLICE_SIZE)
+    H = model.fit_generator(
+        generator = training_generator,
+        steps_per_epoch = (TRAIN_SAMPLES // BATCH_SIZE),
+        epochs = EPOCHS,
+        verbose = 1,
+        validation_data = validation_generator,
+        validation_steps = (VAL_SAMPLES // BATCH_SIZE),
+        use_multiprocessing = MULTI_THREAD,
+        workers = THREADS,
+        max_queue_size = 100
+    )
 
-H = model.fit_generator(
-    generator = training_generator,
-    steps_per_epoch = (TRAIN_SAMPLES // BATCH_SIZE),
-    epochs = EPOCHS,
-    verbose = 1,
-    validation_data = validation_generator,
-    validation_steps = (VAL_SAMPLES // BATCH_SIZE),
-    use_multiprocessing = MULTI_THREAD,
-    workers = THREADS,
-    max_queue_size = 100
-)
+    plt.style.use("ggplot")
+    plt.figure()
+    N = EPOCHS
+    plt.plot(np.arange(0, N), H.history["loss"], label="train_loss")
+    plt.plot(np.arange(0, N), H.history["val_loss"], label="val_loss")
+    plt.plot(np.arange(0, N), H.history["acc"], label="train_acc")
+    plt.plot(np.arange(0, N), H.history["val_acc"], label="val_acc")
+    plt.title("Training Loss and Accuracy")
+    plt.xlabel("Epoch #")
+    plt.ylabel("Loss/Accuracy")
+    plt.legend(loc="upper left")
+    plt.show()
 
-plt.style.use("ggplot")
-plt.figure()
-N = EPOCHS
-plt.plot(np.arange(0, N), H.history["loss"], label="train_loss")
-plt.plot(np.arange(0, N), H.history["val_loss"], label="val_loss")
-plt.plot(np.arange(0, N), H.history["acc"], label="train_acc")
-plt.plot(np.arange(0, N), H.history["val_acc"], label="val_acc")
-plt.title("Training Loss and Accuracy")
-plt.xlabel("Epoch #")
-plt.ylabel("Loss/Accuracy")
-plt.legend(loc="upper left")
-plt.show(block=False)
+    print("[INFO] evaluating network...")
+    predictions = model.predict_generator(
+        testing_generator,
+        steps=(TEST_SAMPLES // BATCH_SIZE)+1,
+        max_queue_size=5,
+        workers=THREADS,
+        use_multiprocessing=MULTI_THREAD,
+        verbose=1
+    )
+    #counter = 0
+    #for pred in predictions:
+    #    if counter >= len(predictions):
+    #        break
+    #    proba = pred
+    #    print(" ".join([s.rjust(str_length) for s in genres]))
+    #    print(" ".join([("{:.2f}".format(p*100)).rjust(str_length) for p in proba]))
+    #    print(" ".join([str(v).rjust(str_length) for v in testY[counter]]))
+    #    print("="*sep_length)
+    #    counter += 1
+    metrics = threshold_accuracy_2d_lists(testY, predictions)
+    #print("Threshold accuracy: {}".format(metric))
+    print(metrics)
+    model_string = "model-slicesize_{}-{}.h5".format(SLICE_SIZE ,datetime.datetime.now().strftime("%m-%d-%H%M%S"))
+    model.save(model_string)
 
-print("[INFO] evaluating network...")
-predictions = model.predict_generator(
-    testing_generator,
-    steps=(TEST_SAMPLES // BATCH_SIZE)+1,
-    max_queue_size=5,
-    workers=THREADS,
-    use_multiprocessing=MULTI_THREAD,
-    verbose=1
-)
-#counter = 0
-#for pred in predictions:
-#    if counter >= len(predictions):
-#        break
-#    proba = pred
-#    #idxs = np.argsort(proba)[::-1][:2]
-#    print(" ".join([s.rjust(str_length) for s in genres]))
-#    print(" ".join([("{:.2f}".format(p*100)).rjust(str_length) for p in proba]))
-#    print(" ".join([str(v).rjust(str_length) for v in testY[counter]]))
-#    print("="*sep_length)
-#    counter += 1
+def video_to_slices(video_path):
+    # Log the time
+    time_start = time.time()
+    # Start capturing the feed
+    cap = cv2.VideoCapture(input_loc)
+    # Find the number of frames
+    video_length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) - 1
+    print("video length was {} should end in {} slices".format(video_length, int(np.ceil(video_length/np.float(SLICE_SIZE)))))
+    count = 0
+    actual_frames = 0
+    print ("Converting video..\n")
+    slices = []
+    # Start converting the video
+    while cap.isOpened():
+        curr_slice = []
+        # Extract the frame
+        ret, frame = cap.read()
+        actual_frames += 1
+        curr_slice.append(frame)
+        if len(curr_slice) >= SLICE_SIZE:
+            slices.append(curr_slice)
+            curr_slice = []
+        # If there are no more frames left
+        if (actual_frames > video_length):
+            if len(curr_slice) > 0:
+                for _ in range(SLICE_SIZE-len(curr_slice)):
+                    curr_slice.append(np.zeros((64,64,3)).astype(np.uint8))
+                slices.append(curr_slice)
+            # Log the time again
+            time_end = time.time()
+            # Release the feed
+            cap.release()
+            # Print stats
+            print ("Done extracting frames.\n%d frames extracted" % count)
+            print ("It took %d seconds forconversion." % (time_end-time_start))
+            break
+    return slices
+
+def process_youtube_link(model_path, youtube_link):
+    model = load_model(model_path)
+    data_folder = './data'
+    yt_vid_name = youtube_link.split('=')[-1]
+    vid_output = "{}/{}".format(data_folder,yt_vid_name)
+    call(["youtube-dl", "-o{}".format(vid_output), youtube_link, "--restrict-filenames", "-f", "mp4/worstvideo"])
+    slices = video_to_slices(vid_output)
+    print("slice info")
+    print("len ",len(slices))
+    print("shape ",np.array(slices).shape)
+    #call(["rm", "-rf", vid_output])
+    print(model.summary())
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description="A deep convolutional neural network for inference on film trailers")
+    parser.add_argument('-m', '--modelname', metavar='model_name', type=str, help='Path to the model you want to use')
+    parser.add_argument('-yt','--youtubelink', metavar='youtube_link', type=str, help='A link to a youtubevideo to be processed')
+    args = parser.parse_args()
+    model_path = args.modelname
+    youtube_link = args.youtubelink
+    print(args)
+    if not model_path and not youtube_link:
+        train_new()
+    else:
+        process_youtube_link(model_path, youtube_link)
+    
+    
 
 
 
-#metric = sum([threshold_accuracy_lists(v, predictions[i]) for i, v in enumerate(testY)])/len(testY)
-metric2 = threshold_accuracy_2d_lists(testY, predictions)
-#print("Threshold accuracy: {}".format(metric))
-print("2D Threshold accuracy: {}".format(metric2))
