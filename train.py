@@ -75,10 +75,16 @@ def threshold_accuracy_2d_lists(y_true, y_pred):
     correct = 0
     total = 0
     incorrect = 0
+    total_ones = 0
+    correct_ones = 0
     non_guesses = 0
     for i in range(len(y_true)):
         for j in range(len(y_true[i])):
             p = y_pred[i,j]
+            if p > upper_threshold:
+                total_ones += 1
+                if round(p) == y_true[i][j]:
+                    correct_ones += 1
             if p < lower_threshold or p > upper_threshold:
                 if round(p) == y_true[i][j]:
                     correct += 1
@@ -89,12 +95,14 @@ def threshold_accuracy_2d_lists(y_true, y_pred):
                 non_guesses += 1
     if total == 0:
         return "The model made no guesses"
-    return "Percent correct {} | Correct {} | Incorrect {} | Precent Guessed {} | guesses {} | non-guesses {} ".format(correct/total,
+    return "Percent correct {} | Correct {} | Incorrect {} | Precent Guessed {} | guesses {} | non-guesses {} | correct-ones {} | total-ones {} ".format(correct/total,
                                                                                                                        correct,
                                                                                                                        incorrect,
                                                                                                                        total/(len(y_true) * len(y_true[0])),
                                                                                                                        total,
-                                                                                                                       non_guesses)
+                                                                                                                       non_guesses,
+                                                                                                                       correct_ones,
+                                                                                                                       total_ones)
 
 
 #t_y_true = tf.constant([0, 1, 0])
@@ -182,6 +190,8 @@ def train_new():
     df['movieId'] = pd.to_numeric(df['movieId'])
 
     genres = df.columns[4:].tolist()
+
+
     print(df.columns)
     print(df.columns[4:])
     str_length = max(len(x) for x in genres)
@@ -189,7 +199,7 @@ def train_new():
     frame_sequences = []
     labels = []
 
-    AMOUNT_TO_TRAIN = 3000
+    AMOUNT_TO_TRAIN = 300
     LIMIT_TRAIN_SET = False
 
     # drop all data not needed for machine learning
@@ -212,7 +222,7 @@ def train_new():
     trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
 
     BATCH_SIZE = 64
-    EPOCHS = 10
+    EPOCHS = 5
     TRAIN_SAMPLES = len(trainX)
     VAL_SAMPLES = len(valX)
     TEST_SAMPLES = len(testX)
@@ -365,7 +375,12 @@ def video_to_slices(video_path):
             break
     return slices
 
-def process_youtube_link(model_path, youtube_link):
+def process_youtube_link(model_path, youtube_link, confidence=0.6):
+
+    genres = None
+    with open("genres.json", "r") as f:
+        genres = json.load(f)
+
     model = load_model(model_path)
     data_folder = './data'
     yt_vid_name = youtube_link.split('=')[-1]
@@ -378,9 +393,14 @@ def process_youtube_link(model_path, youtube_link):
     #print("shape ",np.array(slices).shape)
     #call(["rm", "-rf", vid_output])
     print(model.summary())
+    genre_occ_dict = {key:0 for key in genres}
     for s in slices:
         p = model.predict(np.array([s]))
-        print(p)
+    
+        for i,v in enumerate(p[0]):
+            if v > confidence:
+                genre_occ_dict[genres[i]] += 1
+    print(genre_occ_dict)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
