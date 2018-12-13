@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 from collections import defaultdict
 import numpy as np
 import pandas as pd
@@ -19,6 +20,7 @@ import keras.backend as K
 import tensorflow as tf
 import datetime
 import argparse
+import time
 from subprocess import call
 
 
@@ -33,7 +35,7 @@ if is_windows:
 
 
 # FOR NOW THIS CONSTANT IS NON DYNAMIC BASED ON LOADED MODEL
-# PROBABLY SHOULD DO STUFF TO MAKE IT DYNAMIC IN THE PROCESS 
+# PROBABLY SHOULD DO STUFF TO MAKE IT DYNAMIC IN THE PROCESS
 # YT LINK FUNCTION!
 SLICE_SIZE = 10
 
@@ -87,11 +89,11 @@ def threshold_accuracy_2d_lists(y_true, y_pred):
                 non_guesses += 1
     if total == 0:
         return "The model made no guesses"
-    return "Percent correct {} | Correct {} | Incorrect {} | Precent Guessed {} | guesses {} | non-guesses {} ".format(correct/total, 
-                                                                                                                       correct, 
-                                                                                                                       incorrect, 
-                                                                                                                       total/(len(y_true) * len(y_true[0])), 
-                                                                                                                       total, 
+    return "Percent correct {} | Correct {} | Incorrect {} | Precent Guessed {} | guesses {} | non-guesses {} ".format(correct/total,
+                                                                                                                       correct,
+                                                                                                                       incorrect,
+                                                                                                                       total/(len(y_true) * len(y_true[0])),
+                                                                                                                       total,
                                                                                                                        non_guesses)
 
 
@@ -123,7 +125,7 @@ class data_generator(Sequence):
         return np.array(batch_data), np.array(batch_y)
 
 class slice_generator(Sequence):
-            
+
     def __init__(self, ids, labels, batch_size, movie_sliceN_dict,movieid_labels, slice_sizes):
         self.ids = ids
         self.labels = labels
@@ -328,7 +330,7 @@ def video_to_slices(video_path):
     # Log the time
     time_start = time.time()
     # Start capturing the feed
-    cap = cv2.VideoCapture(input_loc)
+    cap = cv2.VideoCapture(video_path)
     # Find the number of frames
     video_length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) - 1
     print("video length was {} should end in {} slices".format(video_length, int(np.ceil(video_length/np.float(SLICE_SIZE)))))
@@ -336,11 +338,12 @@ def video_to_slices(video_path):
     actual_frames = 0
     print ("Converting video..\n")
     slices = []
+    curr_slice = []
     # Start converting the video
     while cap.isOpened():
-        curr_slice = []
         # Extract the frame
         ret, frame = cap.read()
+        frame = cv2.resize(frame,dsize=(64, 64), interpolation=cv2.INTER_NEAREST)
         actual_frames += 1
         curr_slice.append(frame)
         if len(curr_slice) >= SLICE_SIZE:
@@ -371,9 +374,13 @@ def process_youtube_link(model_path, youtube_link):
     slices = video_to_slices(vid_output)
     print("slice info")
     print("len ",len(slices))
-    print("shape ",np.array(slices).shape)
+    print('type', type(slices))
+    #print("shape ",np.array(slices).shape)
     #call(["rm", "-rf", vid_output])
     print(model.summary())
+    for s in slices:
+        p = model.predict(np.array([s]))
+        print(p)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -388,8 +395,8 @@ if __name__ == '__main__':
         train_new()
     else:
         process_youtube_link(model_path, youtube_link)
-    
-    
+
+
 
 
 
