@@ -7,6 +7,7 @@ from keras.models import Sequential, load_model
 from keras.layers import Dense, Dropout, Flatten, Activation
 from keras.layers import Conv2D, MaxPooling2D, Conv3D, MaxPooling3D
 from keras.layers.normalization import BatchNormalization
+from keras import regularizers
 from keras.utils import Sequence
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
@@ -23,6 +24,8 @@ import argparse
 import time
 from subprocess import call
 
+# size of sampled image
+sz = 64
 
 # its win32, maybe there is win64 too?
 is_windows = sys.platform.startswith('win')
@@ -125,7 +128,8 @@ class data_generator(Sequence):
             #print("Dealing with movieId {}".format(movieId))
             for frame in sorted(os.listdir("frames/%s" % movieId)):
                 frame_data = cv2.imread("frames/%s/%s" % (movieId, frame))
-                frame_data = cv2.resize(frame_data, dsize=(64, 64), interpolation=cv2.INTER_NEAREST)
+                frame_data = cv2.resize(frame_data, dsize=(sz, sz), interpolation=cv2.INTER_NEAREST)
+                #frame_data = cv2.blur(frame_data, (5, 5))
                 frames.append(frame_data)
                 if len(frames) >= self.z_num:
                     break
@@ -154,12 +158,12 @@ class slice_generator(Sequence):
             frames = []
             for frame in sorted(os.listdir("frames/%s" % movieId))[slices*self.slice_sizes:]:
                 frame_data = cv2.imread("frames/%s/%s" % (movieId, frame))
-                frame_data = cv2.resize(frame_data, dsize=(64, 64), interpolation=cv2.INTER_NEAREST)
+                frame_data = cv2.resize(frame_data, dsize=(sz, sz), interpolation=cv2.INTER_NEAREST)
                 frames.append(frame_data)
                 if len(frames) >= self.slice_sizes:
                     break
             for _ in range(self.slice_sizes-len(frames)):
-                frames.append(np.zeros((64,64,3)).astype(np.uint8))
+                frames.append(np.zeros((sz,sz,3)).astype(np.uint8))
             batch_data.append(frames)
             batch_labels.append(self.movieid_labels[movieId])
 
@@ -199,8 +203,8 @@ def train_new():
     frame_sequences = []
     labels = []
 
-    AMOUNT_TO_TRAIN = 300
-    LIMIT_TRAIN_SET = False
+    AMOUNT_TO_TRAIN = 500
+    LIMIT_TRAIN_SET = True
 
     # drop all data not needed for machine learning
     if LIMIT_TRAIN_SET:
@@ -221,60 +225,60 @@ def train_new():
     trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
     trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
 
-    BATCH_SIZE = 64
-    EPOCHS = 5
+    BATCH_SIZE = 16
+    EPOCHS = 4
     TRAIN_SAMPLES = len(trainX)
     VAL_SAMPLES = len(valX)
     TEST_SAMPLES = len(testX)
 
     # now we have to explicitly state shape of our samples because of generators gah
     # (x, y, z, color)
-    train_shape = (SLICE_SIZE,64,64,3) # maybe it will look like this idno the second to last is the idno part
+    train_shape = (SLICE_SIZE,sz,sz,3) # maybe it will look like this idno the second to last is the idno part
 
     model = Sequential()
-    model.add(Conv3D(32, (3, 3, 3), padding="same",input_shape=train_shape))
+    model.add(Conv3D(64, (3, 3, 3), padding="same",input_shape=train_shape))
     model.add(Activation("relu"))
 
     model.add(MaxPooling3D(pool_size=(2, 2, 2)))
     #model.add(Dropout(0.25))
     model.add(BatchNormalization())
 
-    model.add(Conv3D(32, (3, 3, 3), padding="same"))
-    model.add(Activation("relu"))
+    #model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    #model.add(Activation("relu"))
     model.add(Conv3D(32, (3, 3, 3), padding="same"))
     model.add(Activation("relu"))
 
     model.add(MaxPooling3D(pool_size=(2, 2, 2)))
     #model.add(Dropout(0.25))
-    model.add(BatchNormalization())
+    #model.add(BatchNormalization())
 
-    model.add(Conv3D(32, (3, 3, 3), padding="same"))
-    model.add(Activation("relu"))
-    model.add(Conv3D(32, (3, 3, 3), padding="same"))
-    model.add(Activation("relu"))
-    model.add(Conv3D(32, (3, 3, 3), padding="same"))
-    model.add(Activation("relu"))
+    #model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    #model.add(Activation("relu"))
+    #model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    #model.add(Activation("relu"))
+    #model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    #model.add(Activation("relu"))
 
     model.add(MaxPooling3D(pool_size=(2, 2, 2)))
     #model.add(Dropout(0.25))
     model.add(BatchNormalization())
 
     model.add(Flatten()) # it is important to flatten your 2d tensors to 1d when going to FC-layers
-    model.add(Dense(1024, bias_initializer='ones'))
+    model.add(Dense(512, bias_initializer='ones', kernel_regularizer=regularizers.l2(0.01)))
     model.add(Activation("relu"))
-    model.add(BatchNormalization())
+    #model.add(BatchNormalization())
     #model.add(Dropout(0.5))
-    model.add(Dense(1024, bias_initializer='ones'))
-    model.add(Activation("relu"))
-    model.add(BatchNormalization())
-    model.add(Dense(1024, bias_initializer='ones'))
-    model.add(Activation("relu"))
+    #model.add(Dense(1024, bias_initializer='ones', kernel_regularizer=regularizers.l2(0.01)))
+    #model.add(Activation("relu"))
+    #model.add(BatchNormalization())
+    #model.add(Dense(1024, bias_initializer='ones', kernel_regularizer=regularizers.l2(0.01)))
+    #model.add(Activation("relu"))
     model.add(BatchNormalization())
 
     model.add(Dense(len(genres)))
     model.add(Activation("sigmoid"))
 
-    opt = rmsprop(lr=0.0001, decay=1e-6)
+    opt = rmsprop(lr=0.00001, decay=1e-6)
 
     model.compile(loss="binary_crossentropy", optimizer=opt, metrics=["accuracy"])
     print(model.summary())
@@ -353,7 +357,7 @@ def video_to_slices(video_path):
     while cap.isOpened():
         # Extract the frame
         ret, frame = cap.read()
-        frame = cv2.resize(frame,dsize=(64, 64), interpolation=cv2.INTER_NEAREST)
+        frame = cv2.resize(frame,dsize=(sz, sz), interpolation=cv2.INTER_NEAREST)
         actual_frames += 1
         curr_slice.append(frame)
         if len(curr_slice) >= SLICE_SIZE:
@@ -363,7 +367,7 @@ def video_to_slices(video_path):
         if (actual_frames > video_length):
             if len(curr_slice) > 0:
                 for _ in range(SLICE_SIZE-len(curr_slice)):
-                    curr_slice.append(np.zeros((64,64,3)).astype(np.uint8))
+                    curr_slice.append(np.zeros((sz,sz,3)).astype(np.uint8))
                 slices.append(curr_slice)
             # Log the time again
             time_end = time.time()
