@@ -181,8 +181,70 @@ class slice_generator(Sequence):
         if len(curr_batch) != 0:
             slice_map.append(curr_batch)
         return slice_map
+def create_model():
+    
+    genres = None
+    with open("genres.json", "r") as f:
+        genres = json.load(f)
 
-def train_new():
+    train_shape = (SLICE_SIZE,sz,sz,3) # maybe it will look like this idno the second to last is the idno part
+    model = Sequential()
+    model.add(Conv3D(64, (3, 3, 3), padding="same",input_shape=train_shape))
+    model.add(Activation("relu"))
+
+    model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+    #model.add(Dropout(0.25))
+    model.add(BatchNormalization())
+
+    model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    model.add(Activation("relu"))
+    model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    model.add(Activation("relu"))
+
+    model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+    model.add(BatchNormalization())
+
+    model.add(Conv3D(16, (3, 3, 3), padding="same"))
+    model.add(Activation("relu"))
+    model.add(Conv3D(16, (3, 3, 3), padding="same"))
+    model.add(Activation("relu"))
+    model.add(Conv3D(16, (3, 3, 3), padding="same"))
+    model.add(Activation("relu"))
+
+    model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+    model.add(BatchNormalization())
+
+    # model.add(Conv3D(8, (3, 3, 3), padding="same"))
+    # model.add(Activation("relu"))
+    # model.add(Conv3D(8, (3, 3, 3), padding="same"))
+    # model.add(Activation("relu"))
+    # model.add(Conv3D(8, (3, 3, 3), padding="same"))
+    # model.add(Activation("relu"))
+
+    # model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+    # model.add(BatchNormalization())
+
+    model.add(Flatten()) # it is important to flatten your 2d tensors to 1d when going to FC-layers
+    model.add(Dense(1024, bias_initializer='ones'))
+    model.add(Activation("relu"))
+    model.add(BatchNormalization())
+    #model.add(Dropout(0.5))
+    model.add(Dense(1024, bias_initializer='ones'))
+    model.add(Activation("relu"))
+    model.add(BatchNormalization())
+    model.add(Dense(1024, bias_initializer='ones'))
+    model.add(Activation("relu"))
+    model.add(BatchNormalization())
+
+    model.add(Dense(len(genres)))
+    model.add(Activation("sigmoid"))
+
+    opt = rmsprop(lr=0.0001, decay=1e-6)
+
+    model.compile(loss="binary_crossentropy", optimizer=opt, metrics=["accuracy"])
+    return model
+
+def train_model(model):
     with open('frame_info.json', 'r') as f:
         frame_info = json.load(f)
 
@@ -195,16 +257,8 @@ def train_new():
 
     genres = df.columns[4:].tolist()
 
-
-    print(df.columns)
-    print(df.columns[4:])
-    str_length = max(len(x) for x in genres)
-    sep_length = len(genres) * str_length + len(genres)-1
-    frame_sequences = []
-    labels = []
-
     AMOUNT_TO_TRAIN = 500
-    LIMIT_TRAIN_SET = True
+    LIMIT_TRAIN_SET = False
 
     # drop all data not needed for machine learning
     if LIMIT_TRAIN_SET:
@@ -225,63 +279,169 @@ def train_new():
     trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
     trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
 
-    BATCH_SIZE = 16
-    EPOCHS = 4
+    BATCH_SIZE = 64
+    EPOCHS = 20
+    TRAIN_SAMPLES = len(trainX)
+    VAL_SAMPLES = len(valX)
+    TEST_SAMPLES = len(testX)
+
+    training_generator = slice_generator(trainX, trainY, BATCH_SIZE, movieId_sliceN_dict, movieId_label_dict,SLICE_SIZE)
+    validation_generator = slice_generator(valX, valY, BATCH_SIZE, movieId_sliceN_dict, movieId_label_dict,SLICE_SIZE)
+    testing_generator = slice_generator(testX, testY, BATCH_SIZE, movieId_sliceN_dict, movieId_label_dict,SLICE_SIZE)
+
+    if type(model) == str:
+        model = load_model(model_path)
+    elif type(model) != Sequential:
+        print("this shit is no bueno")
+        exit()
+
+    print(model.summary())
+
+    H = model.fit_generator(
+        generator = training_generator,
+        steps_per_epoch = (TRAIN_SAMPLES // BATCH_SIZE),
+        epochs = EPOCHS,
+        verbose = 1,
+        validation_data = validation_generator,
+        validation_steps = (VAL_SAMPLES // BATCH_SIZE),
+        use_multiprocessing = MULTI_THREAD,
+        workers = THREADS,
+        max_queue_size = 100
+    )
+
+    plt.style.use("ggplot")
+    plt.figure()
+    N = EPOCHS
+    plt.plot(np.arange(0, N), H.history["loss"], label="train_loss")
+    plt.plot(np.arange(0, N), H.history["val_loss"], label="val_loss")
+    plt.plot(np.arange(0, N), H.history["acc"], label="train_acc")
+    plt.plot(np.arange(0, N), H.history["val_acc"], label="val_acc")
+    plt.title("Training Loss and Accuracy")
+    plt.xlabel("Epoch #")
+    plt.ylabel("Loss/Accuracy")
+    plt.legend(loc="upper left")
+    plt.show()
+
+    print("[INFO] evaluating network...")
+    predictions = model.predict_generator(
+        testing_generator,
+        steps=(TEST_SAMPLES // BATCH_SIZE)+1,
+        max_queue_size=5,
+        workers=THREADS,
+        use_multiprocessing=MULTI_THREAD,
+        verbose=1
+    )
+
+    metrics = threshold_accuracy_2d_lists(testY, predictions)
+    print(metrics)
+    model_string = "model-slicesize_{}-{}.h5".format(SLICE_SIZE ,datetime.datetime.now().strftime("%m-%d-%H%M%S"))
+    model.save(model_string)
+
+
+def train_new():
+    with open('frame_info.json', 'r') as f:
+        frame_info = json.load(f)
+
+    # get the data
+    df = pd.read_csv('preprocessed_movies.csv')
+    movieids = [f[0] for f in frame_info['good']]
+    prune_mask = df['movieId'].isin(movieids)
+    df = df.loc[prune_mask]
+    df['movieId'] = pd.to_numeric(df['movieId'])
+
+    genres = df.columns[4:].tolist()
+
+
+    # print(df.columns)
+    # print(df.columns[4:])
+    # str_length = max(len(x) for x in genres)
+    # sep_length = len(genres) * str_length + len(genres)-1
+    AMOUNT_TO_TRAIN = 500
+    LIMIT_TRAIN_SET = False
+
+    # drop all data not needed for machine learning
+    if LIMIT_TRAIN_SET:
+        data = df.loc[:AMOUNT_TO_TRAIN,'movieId']
+        labels = df.loc[:AMOUNT_TO_TRAIN, genres].values.tolist()
+    else:
+        data = df.loc[:,'movieId']
+        labels = df.loc[:, genres].values.tolist()
+
+    # movieid lable dict (needed for the slice generator)
+    movieId_label_dict = dict(zip(data,labels))
+
+    # movieid to amount of slices
+    movieId_sliceN_dict = {}
+    for mid, fcount in frame_info['good']:
+        movieId_sliceN_dict[int(mid)] = int(np.ceil(fcount/np.float(SLICE_SIZE)))
+
+    trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
+    trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
+
+    BATCH_SIZE = 64
+    EPOCHS = 10
     TRAIN_SAMPLES = len(trainX)
     VAL_SAMPLES = len(valX)
     TEST_SAMPLES = len(testX)
 
     # now we have to explicitly state shape of our samples because of generators gah
     # (x, y, z, color)
-    train_shape = (SLICE_SIZE,sz,sz,3) # maybe it will look like this idno the second to last is the idno part
+    # train_shape = (SLICE_SIZE,sz,sz,3) # maybe it will look like this idno the second to last is the idno part
+    # model = Sequential()
+    # model.add(Conv3D(64, (3, 3, 3), padding="same",input_shape=train_shape))
+    # model.add(Activation("relu"))
 
-    model = Sequential()
-    model.add(Conv3D(64, (3, 3, 3), padding="same",input_shape=train_shape))
-    model.add(Activation("relu"))
+    # model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+    # #model.add(Dropout(0.25))
+    # model.add(BatchNormalization())
 
-    model.add(MaxPooling3D(pool_size=(2, 2, 2)))
-    #model.add(Dropout(0.25))
-    model.add(BatchNormalization())
+    # model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    # model.add(Activation("relu"))
+    # model.add(Conv3D(32, (3, 3, 3), padding="same"))
+    # model.add(Activation("relu"))
 
-    #model.add(Conv3D(32, (3, 3, 3), padding="same"))
-    #model.add(Activation("relu"))
-    model.add(Conv3D(32, (3, 3, 3), padding="same"))
-    model.add(Activation("relu"))
+    # model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+    # model.add(BatchNormalization())
 
-    model.add(MaxPooling3D(pool_size=(2, 2, 2)))
-    #model.add(Dropout(0.25))
-    #model.add(BatchNormalization())
+    # model.add(Conv3D(16, (3, 3, 3), padding="same"))
+    # model.add(Activation("relu"))
+    # model.add(Conv3D(16, (3, 3, 3), padding="same"))
+    # model.add(Activation("relu"))
+    # model.add(Conv3D(16, (3, 3, 3), padding="same"))
+    # model.add(Activation("relu"))
 
-    #model.add(Conv3D(32, (3, 3, 3), padding="same"))
-    #model.add(Activation("relu"))
-    #model.add(Conv3D(32, (3, 3, 3), padding="same"))
-    #model.add(Activation("relu"))
-    #model.add(Conv3D(32, (3, 3, 3), padding="same"))
-    #model.add(Activation("relu"))
+    # model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+    # model.add(BatchNormalization())
 
-    model.add(MaxPooling3D(pool_size=(2, 2, 2)))
-    #model.add(Dropout(0.25))
-    model.add(BatchNormalization())
+    # # model.add(Conv3D(8, (3, 3, 3), padding="same"))
+    # # model.add(Activation("relu"))
+    # # model.add(Conv3D(8, (3, 3, 3), padding="same"))
+    # # model.add(Activation("relu"))
+    # # model.add(Conv3D(8, (3, 3, 3), padding="same"))
+    # # model.add(Activation("relu"))
 
-    model.add(Flatten()) # it is important to flatten your 2d tensors to 1d when going to FC-layers
-    model.add(Dense(512, bias_initializer='ones', kernel_regularizer=regularizers.l2(0.01)))
-    model.add(Activation("relu"))
-    #model.add(BatchNormalization())
-    #model.add(Dropout(0.5))
-    #model.add(Dense(1024, bias_initializer='ones', kernel_regularizer=regularizers.l2(0.01)))
-    #model.add(Activation("relu"))
-    #model.add(BatchNormalization())
-    #model.add(Dense(1024, bias_initializer='ones', kernel_regularizer=regularizers.l2(0.01)))
-    #model.add(Activation("relu"))
-    model.add(BatchNormalization())
+    # # model.add(MaxPooling3D(pool_size=(2, 2, 2)))
+    # # model.add(BatchNormalization())
 
-    model.add(Dense(len(genres)))
-    model.add(Activation("sigmoid"))
+    # model.add(Flatten()) # it is important to flatten your 2d tensors to 1d when going to FC-layers
+    # model.add(Dense(1024, bias_initializer='ones'))
+    # model.add(Activation("relu"))
+    # model.add(BatchNormalization())
+    # #model.add(Dropout(0.5))
+    # model.add(Dense(1024, bias_initializer='ones'))
+    # model.add(Activation("relu"))
+    # model.add(BatchNormalization())
+    # model.add(Dense(1024, bias_initializer='ones'))
+    # model.add(Activation("relu"))
+    # model.add(BatchNormalization())
 
-    opt = rmsprop(lr=0.00001, decay=1e-6)
+    # model.add(Dense(len(genres)))
+    # model.add(Activation("sigmoid"))
 
-    model.compile(loss="binary_crossentropy", optimizer=opt, metrics=["accuracy"])
-    print(model.summary())
+    # opt = rmsprop(lr=0.0001, decay=1e-6)
+
+    # model.compile(loss="binary_crossentropy", optimizer=opt, metrics=["accuracy"])
+    # print(model.summary())
 
     #training_generator = data_generator(trainX, trainY, BATCH_SIZE)
     #validation_generator = data_generator(valX, valY, BATCH_SIZE)
@@ -289,6 +449,8 @@ def train_new():
     training_generator = slice_generator(trainX, trainY, BATCH_SIZE, movieId_sliceN_dict, movieId_label_dict,SLICE_SIZE)
     validation_generator = slice_generator(valX, valY, BATCH_SIZE, movieId_sliceN_dict, movieId_label_dict,SLICE_SIZE)
     testing_generator = slice_generator(testX, testY, BATCH_SIZE, movieId_sliceN_dict, movieId_label_dict,SLICE_SIZE)
+
+    model = create_model()
 
     H = model.fit_generator(
         generator = training_generator,
@@ -406,6 +568,9 @@ def process_youtube_link(model_path, youtube_link, confidence=0.6):
                 genre_occ_dict[genres[i]] += 1
     print(genre_occ_dict)
 
+def continue_training(model_path):
+    model = load_model(model_path)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description="A deep convolutional neural network for inference on film trailers")
@@ -416,7 +581,10 @@ if __name__ == '__main__':
     youtube_link = args.youtubelink
     print(args)
     if not model_path and not youtube_link:
-        train_new()
+        model = create_model()
+        train_model(model)
+    elif not youtube_link:
+        train_model(model_path)
     else:
         process_youtube_link(model_path, youtube_link)
 
