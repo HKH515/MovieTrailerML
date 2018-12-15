@@ -71,10 +71,7 @@ def threshold_accuracy_lists(y_true, y_pred):
     corrects = [i for i in valid_preds if round(valid_preds[i]) == y_true[i]]
     return len(corrects)/len(valid_preds)
 
-def threshold_accuracy_2d_lists(y_true, y_pred):
-    threshold = 0.25
-    lower_threshold = 0.5-threshold
-    upper_threshold = 0.5+threshold
+def threshold_accuracy_2d_lists(y_true, y_pred, lower_threshold, upper_threshold):
     correct = 0
     total = 0
     incorrect = 0
@@ -332,7 +329,7 @@ def train_model(model):
         verbose=1
     )
 
-    metrics = threshold_accuracy_2d_lists(testY, predictions)
+    metrics = threshold_accuracy_2d_lists(testY, predictions, 0.1, 0.5)
     print(metrics)
     model_string = "model-slicesize_{}-{}.h5".format(SLICE_SIZE ,datetime.datetime.now().strftime("%m-%d-%H%M%S"))
     model.save(model_string)
@@ -496,11 +493,45 @@ def train_new():
     #    print(" ".join([str(v).rjust(str_length) for v in testY[counter]]))
     #    print("="*sep_length)
     #    counter += 1
-    metrics = threshold_accuracy_2d_lists(testY, predictions)
+    metrics = threshold_accuracy_2d_lists(testY, predictions, 0.1, 0.5)
     #print("Threshold accuracy: {}".format(metric))
     print(metrics)
     model_string = "model-slicesize_{}-{}.h5".format(SLICE_SIZE ,datetime.datetime.now().strftime("%m-%d-%H%M%S"))
     model.save(model_string)
+
+def frame_folder_to_slices(folder):
+    # Log the time
+    time_start = time.time()
+    count = 0
+    actual_frames = 0
+    slices = []
+    curr_slice = []
+    video_length = len(os.listdir(folder))-1
+    print("vide_length: %s" % video_length)
+    for frame in sorted(os.listdir(folder)):
+        print("{}/{}".format(folder, frame))
+        # Extract the frame
+        frame_img = cv2.imread("{}/{}".format(folder, frame))
+        frame_img = cv2.resize(frame_img,dsize=(sz, sz), interpolation=cv2.INTER_NEAREST)
+        actual_frames += 1
+        curr_slice.append(frame_img)
+        if len(curr_slice) >= SLICE_SIZE:
+            slices.append(curr_slice)
+            curr_slice = []
+        # If there are no more frames left
+        if (actual_frames > video_length):
+            if len(curr_slice) > 0:
+                for _ in range(SLICE_SIZE-len(curr_slice)):
+                    curr_slice.append(np.zeros((sz,sz,3)).astype(np.uint8))
+                slices.append(curr_slice)
+            # Log the time again
+            time_end = time.time()
+            # Print stats
+            print ("Done extracting frames.\n%d frames extracted" % count)
+            print ("It took %d seconds forconversion." % (time_end-time_start))
+            break
+    print(slices) 
+    return slices
 
 def video_to_slices(video_path):
     # Log the time
@@ -568,6 +599,51 @@ def process_youtube_link(model_path, youtube_link, confidence=0.6):
                 genre_occ_dict[genres[i]] += 1
     print(genre_occ_dict)
 
+def process_frame_folder(model_path, folder_path, confidence=0.6):
+
+    genres = get_genres()
+
+    model = load_model(model_path)
+    #data_folder = './data'
+    #vid_output = "{}/{}".format(data_folder,folder)
+    slices = frame_folder_to_slices(folder_path)
+    print("slice info")
+    print("len ",len(slices))
+    print('type', type(slices))
+    #print("shape ",np.array(slices).shape)
+    #call(["rm", "-rf", vid_output])
+    print(model.summary())
+    genre_occ_dict = {key:0 for key in genres}
+    combined = []
+    for s in slices:
+        p = model.predict(np.array([s]))
+        combined.append(p)
+
+    np_combined = np.array(combined)
+    mean_frame_confidences = np.average(np_combined, axis=0)
+    print(convert_confidence_matrix_to_string(mean_frame_confidences)) 
+    print()
+    #    print(p)
+    #    for i,v in enumerate(p[0]):
+    #        if v > confidence:
+    #            genre_occ_dict[genres[i]] += 1
+    #print(genre_occ_dict)
+
+def get_genres():
+    genres = None
+    with open("genres.json", "r") as f:
+        genres = json.load(f)
+    return genres
+
+def convert_confidence_matrix_to_string(mat):
+    genres = get_genres()
+    genre_dict = {genre:0 for genre in genres}
+    for i, genre in enumerate(genres):
+        genre_dict[genre] = mat[0][i]
+    kv_tuples = sorted([(k, v) for k, v in genre_dict.items()], key = lambda x: x[1], reverse = True)
+    kv_strings = ["{}: {:.3f}".format(k, v) for k,v in kv_tuples]
+    return "\n".join(kv_strings)
+    
 def continue_training(model_path):
     model = load_model(model_path)
 
@@ -576,17 +652,34 @@ if __name__ == '__main__':
         description="A deep convolutional neural network for inference on film trailers")
     parser.add_argument('-m', '--modelname', metavar='model_name', type=str, help='Path to the model you want to use')
     parser.add_argument('-yt','--youtubelink', metavar='youtube_link', type=str, help='A link to a youtubevideo to be processed')
+    parser.add_argument('-f','--folder', metavar='folder', type=str, help='A path to a folder of frames, useful for short sequences not hosted on youtube')
     args = parser.parse_args()
     model_path = args.modelname
     youtube_link = args.youtubelink
+    folder = args.folder
     print(args)
-    if not model_path and not youtube_link:
+    if not model_path:
         model = create_model()
         train_model(model)
-    elif not youtube_link:
-        train_model(model_path)
     else:
-        process_youtube_link(model_path, youtube_link)
+        if youtube_link:
+            process_youtube_link(model_path, youtube_link)
+        elif folder:
+            process_frame_folder(model_path, folder)
+        # if no option was selected, continue to train supplied model
+        else:
+            train_model(model_path)
+
+
+    #if not model_path and not youtube_link:
+    #    model = create_model()
+    #    train_model(model)
+    #elif not youtube_link:
+    #    train_model(model_path)
+    #elif youtube_link:
+    #    process_youtube_link(model_path, youtube_link)
+    #elif folder:
+    #    process_frame_folder(model_path)
 
 
 
