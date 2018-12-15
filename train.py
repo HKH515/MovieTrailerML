@@ -276,8 +276,8 @@ def train_model(model):
     trainX, testX, trainY, testY = train_test_split(data, labels, test_size=0.2, random_state=42)
     trainX, valX, trainY, valY = train_test_split(trainX, trainY, test_size=0.2, random_state=42)
 
-    BATCH_SIZE = 64
-    EPOCHS = 20
+    BATCH_SIZE = 16
+    EPOCHS = 5
     TRAIN_SAMPLES = len(trainX)
     VAL_SAMPLES = len(valX)
     TEST_SAMPLES = len(testX)
@@ -482,17 +482,25 @@ def convert_confidence_matrix_to_string(mat):
 def continue_training(model_path):
     model = load_model(model_path)
 
+def draw_model(model_path, picture_path):
+    #import is inside here since we do not want to break the code for people who do not have dependencies
+    from keras.utils import plot_model
+
+    model = load_model(model_path)
+    plot_model(model, to_file=picture_path)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description="A deep convolutional neural network for inference on film trailers")
     parser.add_argument('-m', '--modelname', metavar='model_name', type=str, help='Path to the model you want to use')
     parser.add_argument('-yt','--youtubelink', metavar='youtube_link', type=str, help='A link to a youtubevideo to be processed')
     parser.add_argument('-f','--folder', metavar='folder', type=str, help='A path to a folder of frames, useful for short sequences not hosted on youtube')
+    parser.add_argument('-d','--draw', metavar='draw', type=str, help='Saves a visual representation of the Keras model to a file, whose filename is the argument')
     args = parser.parse_args()
     model_path = args.modelname
     youtube_link = args.youtubelink
     folder = args.folder
-    print(args)
+    draw = args.draw
     if not model_path:
         model = create_model()
         train_model(model)
@@ -501,6 +509,8 @@ if __name__ == '__main__':
             process_youtube_link(model_path, youtube_link)
         elif folder:
             process_frame_folder(model_path, folder)
+        elif draw:
+            draw_model(model_path, draw)
         # if no option was selected, continue to train supplied model
         else:
             train_model(model_path)
