@@ -190,11 +190,8 @@ def create_model():
     model.add(Activation("relu"))
 
     model.add(MaxPooling3D(pool_size=(2, 2, 2)))
-    #model.add(Dropout(0.25))
     model.add(BatchNormalization())
 
-    model.add(Conv3D(32, (3, 3, 3), padding="same"))
-    model.add(Activation("relu"))
     model.add(Conv3D(32, (3, 3, 3), padding="same"))
     model.add(Activation("relu"))
 
@@ -203,32 +200,11 @@ def create_model():
 
     model.add(Conv3D(16, (3, 3, 3), padding="same"))
     model.add(Activation("relu"))
-    model.add(Conv3D(16, (3, 3, 3), padding="same"))
-    model.add(Activation("relu"))
-    model.add(Conv3D(16, (3, 3, 3), padding="same"))
-    model.add(Activation("relu"))
 
     model.add(MaxPooling3D(pool_size=(2, 2, 2)))
     model.add(BatchNormalization())
-
-    # model.add(Conv3D(8, (3, 3, 3), padding="same"))
-    # model.add(Activation("relu"))
-    # model.add(Conv3D(8, (3, 3, 3), padding="same"))
-    # model.add(Activation("relu"))
-    # model.add(Conv3D(8, (3, 3, 3), padding="same"))
-    # model.add(Activation("relu"))
-
-    # model.add(MaxPooling3D(pool_size=(2, 2, 2)))
-    # model.add(BatchNormalization())
 
     model.add(Flatten()) # it is important to flatten your 2d tensors to 1d when going to FC-layers
-    model.add(Dense(1024, bias_initializer='ones'))
-    model.add(Activation("relu"))
-    model.add(BatchNormalization())
-    #model.add(Dropout(0.5))
-    model.add(Dense(1024, bias_initializer='ones'))
-    model.add(Activation("relu"))
-    model.add(BatchNormalization())
     model.add(Dense(1024, bias_initializer='ones'))
     model.add(Activation("relu"))
     model.add(BatchNormalization())
@@ -254,8 +230,8 @@ def train_model(model):
 
     genres = df.columns[4:].tolist()
 
-    AMOUNT_TO_TRAIN = 500
-    LIMIT_TRAIN_SET = False
+    AMOUNT_TO_TRAIN = 1000
+    LIMIT_TRAIN_SET = True
 
     # drop all data not needed for machine learning
     if LIMIT_TRAIN_SET:
@@ -487,7 +463,7 @@ def draw_model(model_path, picture_path):
     from keras.utils import plot_model
 
     model = load_model(model_path)
-    plot_model(model, to_file=picture_path)
+    plot_model(model, show_shapes=True, to_file=picture_path)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
