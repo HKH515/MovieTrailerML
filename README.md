@@ -8,3 +8,11 @@ The data we collected on each trailer is every hundredth frame of each trailer, 
 ![Alt text](./eximg2.jpg?raw=true "Title")
 
 Many of the movies in our dataset have multiple genres, in these cases we created multiple instances of each film each with a single genre. We do not know what impact this will have on the results but we are excited to see.
+
+## Troubleshooting
+If you get an error telling you you need to install pydot when trying to draw the model, try executing these commands in this order:
+```sh
+pip intall pydot
+pip intall pydotplus
+pip intall graphviz
+```
